@@ -9,7 +9,7 @@ import {
   FileQuestion,
   TrendingUp,
   AlertTriangle,
-  UploadCloud,
+  Plus,
   ArrowRight,
 } from 'lucide-react';
 import { getActiveQuestions } from '@/lib/data/question-repository';
@@ -53,8 +53,8 @@ export default function AdminDashboardPage() {
             href="/admin/questions/import"
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm rounded-lg transition-colors shadow-sm"
           >
-            <UploadCloud className="w-4 h-4" />
-            <span>Bulk Import Questions</span>
+            <Plus className="w-4 h-4" />
+            <span>Import New Paper</span>
           </Link>
         </div>
       </div>

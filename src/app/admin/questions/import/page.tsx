@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   UploadCloud,
   CheckCircle,
@@ -12,7 +13,7 @@ import {
   FileCode,
   Info,
 } from 'lucide-react';
-import { computeTextHash } from '@/lib/utils';
+import { computeTextHash, parseCsvToObjects } from '@/lib/utils';
 import { convertRawRowToQuestion, saveImportedQuestions } from '@/lib/data/question-repository';
 import { Question } from '@/types/database';
 
@@ -32,9 +33,15 @@ export default function BulkImportPage() {
   const [duplicateCount, setDuplicateCount] = useState(0);
   const [importStatus, setImportStatus] = useState<'idle' | 'validated' | 'success'>('idle');
 
-  const sampleCsvTemplate = `exam,year,paper,section,language,question_no,subject,chapter,topic,question,option_a,option_a_explanation,option_b,option_b_explanation,option_c,option_c_explanation,option_d,option_d_explanation,option_e,option_e_explanation,answer,explanation,source_basis
-TRE 1,2023,NB-2023-08-26-37,General Studies,English,1,General Studies,General Knowledge,General Knowledge,How many three-digit numbers are divisible by 5?,180,"Correct. A whole number is divisible by 5 when its last digit is 0 or 5. Among three-digit numbers, this gives 180 numbers (100–999).",200,"Incorrect.",120,"Incorrect.",More than one of the above,"Incorrect.",None of the above,"Incorrect.",A,"A whole number is divisible by 5 when its last digit is 0 or 5.",NCERT/SCERT-aligned school-level concept
-TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / Algebra / Geometry,Arithmetic / Algebra / Geometry,10% loss on selling price is what percent loss on cost price?,9 1 11%,"Correct.",9 2 11%,"Incorrect.",10%,"Incorrect.",More than one of the above,"Incorrect.",None of the above,"Incorrect.",A,"If SP is 90% of CP, loss on CP is (10/90)*100 = 11.11%.",NCERT/SCERT-aligned school-level concept`;
+  // Paper Metadata Overrides
+  const [examName, setExamName] = useState('');
+  const [paperYear, setPaperYear] = useState('');
+  const [paperShift, setPaperShift] = useState('');
+  const [defaultSubject, setDefaultSubject] = useState('');
+
+  const sampleCsvTemplate = `subject,topic,question,option_a,option_b,option_c,option_d,option_e,correct op,option_a_explanation,option_b_explanation,option_c_explanation,option_d_explanation,option_e_explanation
+General Studies,General Knowledge,How many three-digit numbers are divisible by 5?,180,200,120,More than one of the above,None of the above,A,"Correct. A whole number is divisible by 5 when its last digit is 0 or 5. Among three-digit numbers, this gives 180 numbers (100–999).",200 — candidate value.,120 — candidate value.,,
+Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what percent loss on cost price?,9 1 11%,9 2 11%,10%,More than one of the above,None of the above,A,"Correct. If SP is 90% of CP, loss as percentage of CP is (10/90)x100 = 11.11%.",9 2 11% — candidate value.,10% — candidate value.,,`;
 
   const sampleJsonTemplate = `[
   {
@@ -56,66 +63,6 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
     "tags": ["DBMS", "SQL", "DDL"]
   }
 ]`;
-
-  /**
-   * Advanced CSV parser supporting multi-line quotes and custom headers
-   */
-  const parseCsvToObjects = (csvString: string) => {
-    const lines: string[] = [];
-    let currentLine = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < csvString.length; i++) {
-      const char = csvString[i];
-      if (char === '"' && csvString[i + 1] === '"') {
-        currentLine += '"';
-        i++; // skip escaped quote
-      } else if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (currentLine.trim()) lines.push(currentLine);
-        currentLine = '';
-      } else {
-        currentLine += char;
-      }
-    }
-    if (currentLine.trim()) lines.push(currentLine);
-
-    if (lines.length < 2) return [];
-
-    const splitRow = (line: string) => {
-      const row: string[] = [];
-      let cell = '';
-      let q = false;
-      for (let i = 0; i < line.length; i++) {
-        const c = line[i];
-        if (c === '"') {
-          q = !q;
-        } else if (c === ',' && !q) {
-          row.push(cell.trim());
-          cell = '';
-        } else {
-          cell += c;
-        }
-      }
-      row.push(cell.trim());
-      return row;
-    };
-
-    const headers = splitRow(lines[0]).map((h) => h.toLowerCase().replace(/["']/g, '').trim());
-    const results: any[] = [];
-
-    for (let r = 1; r < lines.length; r++) {
-      const values = splitRow(lines[r]).map((v) => v.replace(/^"|"$/g, '').trim());
-      const obj: any = {};
-      headers.forEach((h, idx) => {
-        obj[h] = values[idx] || '';
-      });
-      results.push(obj);
-    }
-
-    return results;
-  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -141,8 +88,20 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
     setDuplicateCount(0);
 
     try {
+      if (!examName.trim()) {
+        setValidationErrors([{ row: 0, field: 'Exam Name', message: 'Exam Name is required (e.g. TRE 1 or BPSC TRE 3.0).' }]);
+        setIsProcessing(false);
+        return;
+      }
+
+      if (!paperYear.trim()) {
+        setValidationErrors([{ row: 0, field: 'Year / Date', message: 'Year or Date is required (e.g. 2023 or 2024-08-09).' }]);
+        setIsProcessing(false);
+        return;
+      }
+
       if (!inputText.trim()) {
-        setValidationErrors([{ row: 0, field: 'Payload Input', message: 'Input cannot be empty.' }]);
+        setValidationErrors([{ row: 0, field: 'Payload Input', message: 'Input CSV or JSON text cannot be empty.' }]);
         setIsProcessing(false);
         return;
       }
@@ -169,10 +128,17 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
       const convertedQuestions: Question[] = [];
       let dups = 0;
 
+      const metadataOverride = {
+        examName: examName.trim(),
+        year: paperYear.trim(),
+        shift: paperShift.trim(),
+        subject: defaultSubject.trim(),
+      };
+
       parsedRows.forEach((row, index) => {
         const rowNum = index + 1;
         const qText = row.question || row.question_text || '';
-        const answer = row.answer || row.correct_option || '';
+        const answer = row['correct op'] || row.correct_op || row.correct_option || row.answer || '';
 
         // Check fatal missing fields
         let isFatalError = false;
@@ -183,16 +149,14 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
         }
 
         if (!answer) {
-          errors.push({ row: rowNum, field: 'answer', message: 'Answer key (A, B, C, D, E) is missing.' });
+          errors.push({ row: rowNum, field: 'correct op', message: 'Answer key (correct op: A, B, C, D, E) is missing.' });
           isFatalError = true;
         }
 
         if (qText) {
-          // Contextual key: exam + paper + question_no + question_text
-          const rowKey = `${row.exam || ''}_${row.paper || ''}_${row.question_no || index}_${computeTextHash(qText)}`;
+          const rowKey = `${examName}_${paperYear}_${index}_${computeTextHash(qText)}`;
           if (seenRowKeys.has(rowKey)) {
             dups++;
-            // Flag as warning instead of blocking import (Product Rule: Flag duplicates for review)
             errors.push({
               row: rowNum,
               field: 'duplicate',
@@ -204,9 +168,8 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
           }
         }
 
-        // Include row if no fatal errors
         if (!isFatalError) {
-          convertedQuestions.push(convertRawRowToQuestion(row, index));
+          convertedQuestions.push(convertRawRowToQuestion(row, index, metadataOverride));
         }
       });
 
@@ -224,7 +187,7 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
   const handleConfirmImport = () => {
     setIsProcessing(true);
     setTimeout(() => {
-      saveImportedQuestions(validQuestions);
+      saveImportedQuestions(validQuestions, true);
       setIsProcessing(false);
       setImportStatus('success');
     }, 600);
@@ -237,10 +200,66 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
     <div className="space-y-6">
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
-        <h1 className="text-2xl font-bold text-white tracking-tight">Bulk Question Import Tool</h1>
+        <h1 className="text-2xl font-bold text-white tracking-tight">Import New Question Paper</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Validate and bulk import official PYQs or practice items via CSV or JSON with automatic schema recognition.
+          Validate and import official PYQs or practice items via CSV or JSON with custom paper metadata overrides.
         </p>
+      </div>
+
+      {/* Paper Metadata Form Header Box */}
+      <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-3">
+        <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+          <Info className="w-4 h-4 text-indigo-400" />
+          <span>Paper Details & Metadata (Applied to Import Batch)</span>
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div>
+            <label className="block text-slate-300 mb-1 font-semibold">
+              Exam Name <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={examName}
+              onChange={(e) => setExamName(e.target.value)}
+              placeholder="e.g. TRE 1 or BPSC TRE 3.0"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-300 mb-1 font-semibold">
+              Year / Date <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={paperYear}
+              onChange={(e) => setPaperYear(e.target.value)}
+              placeholder="e.g. 2023 or 2024-08-09"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1 font-semibold">Shift / Session (Optional)</label>
+            <input
+              type="text"
+              value={paperShift}
+              onChange={(e) => setPaperShift(e.target.value)}
+              placeholder="e.g. Shift 1 (HS)"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1 font-semibold">Default Subject (Optional)</label>
+            <input
+              type="text"
+              value={defaultSubject}
+              onChange={(e) => setDefaultSubject(e.target.value)}
+              placeholder="e.g. General Studies"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -401,12 +420,26 @@ TRE 1,2023,NB-2023-08-26-37,General Studies,English,2,Mathematics,Arithmetic / A
           )}
 
           {importStatus === 'success' && (
-            <div className="bg-emerald-950/40 border border-emerald-900/60 rounded-lg p-6 text-center space-y-3">
+            <div className="bg-emerald-950/40 border border-emerald-900/60 rounded-lg p-6 text-center space-y-4">
               <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
               <h3 className="text-base font-bold text-emerald-200">Import Batch Committed Successfully</h3>
               <p className="text-xs text-emerald-300/80">
                 All {validQuestions.length} questions, option-wise explanations, and subject tags are now active across Learning Mode and CBT Test Mode!
               </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <Link
+                  href="/admin/exams"
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold rounded-lg border border-slate-800"
+                >
+                  Go to Exams & Papers
+                </Link>
+                <Link
+                  href="/admin/questions"
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg shadow-sm"
+                >
+                  View Question Bank
+                </Link>
+              </div>
             </div>
           )}
         </div>

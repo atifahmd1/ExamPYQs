@@ -4,7 +4,6 @@ import {
   FileText,
   BookOpen,
   HelpCircle,
-  UploadCloud,
   History,
   Shield,
   ExternalLink,
@@ -18,7 +17,6 @@ export default function AdminLayout({
   const navItems = [
     { name: 'Overview', href: '/admin', icon: LayoutDashboard },
     { name: 'Questions', href: '/admin/questions', icon: HelpCircle },
-    { name: 'Bulk Import', href: '/admin/questions/import', icon: UploadCloud },
     { name: 'Exams & Papers', href: '/admin/exams', icon: FileText },
     { name: 'Subjects & Topics', href: '/admin/subjects', icon: BookOpen },
     { name: 'Audit Logs', href: '/admin/audit-logs', icon: History },

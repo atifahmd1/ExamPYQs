@@ -51,6 +51,66 @@ export function formatPercentage(value: number): string {
 }
 
 /**
+ * Advanced CSV parser supporting multi-line quotes and custom headers
+ */
+export function parseCsvToObjects(csvString: string): Record<string, string>[] {
+  const lines: string[] = [];
+  let currentLine = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csvString.length; i++) {
+    const char = csvString[i];
+    if (char === '"' && csvString[i + 1] === '"') {
+      currentLine += '"';
+      i++; // skip escaped quote
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (currentLine.trim()) lines.push(currentLine);
+      currentLine = '';
+    } else {
+      currentLine += char;
+    }
+  }
+  if (currentLine.trim()) lines.push(currentLine);
+
+  if (lines.length < 2) return [];
+
+  const splitRow = (line: string) => {
+    const row: string[] = [];
+    let cell = '';
+    let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        q = !q;
+      } else if (c === ',' && !q) {
+        row.push(cell.trim());
+        cell = '';
+      } else {
+        cell += c;
+      }
+    }
+    row.push(cell.trim());
+    return row;
+  };
+
+  const headers = splitRow(lines[0]).map((h) => h.toLowerCase().replace(/["']/g, '').trim());
+  const results: Record<string, string>[] = [];
+
+  for (let r = 1; r < lines.length; r++) {
+    const values = splitRow(lines[r]).map((v) => v.replace(/^"|"$/g, '').trim());
+    const obj: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      obj[h] = values[idx] || '';
+    });
+    results.push(obj);
+  }
+
+  return results;
+}
+
+/**
  * Sanitize error messages for user safety
  */
 export function getSanitizedErrorMessage(error: unknown): string {

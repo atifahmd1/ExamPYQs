@@ -212,7 +212,7 @@ function QuestionsTableContent() {
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium text-sm rounded-lg transition-colors"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Bulk CSV/JSON Import</span>
+            <span>Import New Paper</span>
           </Link>
 
           <Link
