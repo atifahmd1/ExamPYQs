@@ -1,1 +1,0 @@
-supabase_db_pass=EPA8lkWCYYnKyrSY

@@ -23,15 +23,27 @@
 # misc
 .DS_Store
 *.pem
+*.log
+.vscode/
+.idea/
+.gemini/
 
-# debug
+# prompt & internal specification notes
+masterprompt.txt
+notes.txt
+extra_rules.md
+product_rules.md
+DEFINITION_OF_DONE.md
+
+# debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.example
 
 # vercel
 .vercel
