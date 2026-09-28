@@ -33,34 +33,36 @@ export default function BulkImportPage() {
   const [duplicateCount, setDuplicateCount] = useState(0);
   const [importStatus, setImportStatus] = useState<'idle' | 'validated' | 'success'>('idle');
 
-  // Paper Metadata Overrides
+  // Optional Metadata Overrides
   const [examName, setExamName] = useState('');
   const [paperYear, setPaperYear] = useState('');
   const [paperShift, setPaperShift] = useState('');
   const [defaultSubject, setDefaultSubject] = useState('');
 
-  const sampleCsvTemplate = `subject,topic,question,option_a,option_b,option_c,option_d,option_e,correct op,option_a_explanation,option_b_explanation,option_c_explanation,option_d_explanation,option_e_explanation
-General Studies,General Knowledge,How many three-digit numbers are divisible by 5?,180,200,120,More than one of the above,None of the above,A,"Correct. A whole number is divisible by 5 when its last digit is 0 or 5. Among three-digit numbers, this gives 180 numbers (100–999).",200 — candidate value.,120 — candidate value.,,
-Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what percent loss on cost price?,9 1 11%,9 2 11%,10%,More than one of the above,None of the above,A,"Correct. If SP is 90% of CP, loss as percentage of CP is (10/90)x100 = 11.11%.",9 2 11% — candidate value.,10% — candidate value.,,`;
+  const sampleCsvTemplate = `exam name,date,shift,difficulty level,subject,topic,question,option_a,option_b,option_c,option_d,option_e,correct op,option_a_explanation,option_b_explanation,option_c_explanation,option_d_explanation,option_e_explanation
+TRE 1,26-Aug-2023,1,medium,Mathematics,Number System,How many three-digit numbers are divisible by 5?,180,200,120,More than one of the above,None of the above,A,"Correct. A whole number is divisible by 5 when its last digit is 0 or 5. Among three-digit numbers, this gives 180 numbers (100–999).",200 is a candidate count but not the count of three-digit multiples of 5.,120 is not the count of three-digit multiples of 5.,,
+TRE 1,26-Aug-2023,1,medium,Mathematics,Percentage & Profit/Loss,10% loss on selling price is what percent loss on cost price?,9 1 11%,9 2 11%,10%,More than one of the above,None of the above,A,"Correct. If the selling price is 90% of the cost price, then the loss as a percentage of cost price is (10/90)×100 = 11.11%.",,,,
+TRE 2,15-Dec-2023,1,medium,Computer Science,DBMS & SQL,SQL views are also known as,simple tables,virtual tables,complex tables,More than one of the above,None of the above,B,A simple table is a normal stored table; a view is a virtual table based on a query.,Correct. A view is a virtual relation defined by a query.,Complex table is not the standard synonym for a SQL view.,,`;
 
   const sampleJsonTemplate = `[
   {
-    "official_source_ref": "BPSC TRE 3.0 CS Q.4",
-    "subject_code": "computer-science",
-    "chapter_code": "dbms",
-    "topic_code": "sql",
-    "question_text": "Which SQL command is used to remove a table definition and all its data from the database?",
-    "source_type": "official_pyq",
-    "difficulty": "medium",
-    "options": [
-      { "letter": "A", "text": "DELETE", "is_correct": false, "explanation": "DELETE removes rows, not table structure." },
-      { "letter": "B", "text": "REMOVE", "is_correct": false, "explanation": "REMOVE is not a valid SQL DDL command." },
-      { "letter": "C", "text": "DROP", "is_correct": true, "explanation": "DROP TABLE deletes both data and relation schema." },
-      { "letter": "D", "text": "TRUNCATE", "is_correct": false, "explanation": "TRUNCATE removes all rows but retains table structure." },
-      { "letter": "E", "text": "None of the above", "is_correct": false, "explanation": "DROP is correct." }
-    ],
-    "overall_explanation": "DROP TABLE is a DDL command that removes table metadata and data completely from database schema.",
-    "tags": ["DBMS", "SQL", "DDL"]
+    "exam name": "TRE 3",
+    "date": "09-Aug-2024",
+    "shift": "1",
+    "difficulty level": "medium",
+    "subject": "Computer Science",
+    "topic": "DBMS & SQL",
+    "question": "Which SQL command is used to remove a table definition and all its data from the database?",
+    "option_a": "DELETE",
+    "option_b": "REMOVE",
+    "option_c": "DROP",
+    "option_d": "TRUNCATE",
+    "option_e": "None of the above",
+    "correct op": "C",
+    "option_a_explanation": "DELETE removes rows, not table structure.",
+    "option_b_explanation": "REMOVE is not a valid SQL command.",
+    "option_c_explanation": "DROP TABLE deletes both data and relation schema.",
+    "option_d_explanation": "TRUNCATE removes all rows but retains table structure."
   }
 ]`;
 
@@ -88,18 +90,6 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
     setDuplicateCount(0);
 
     try {
-      if (!examName.trim()) {
-        setValidationErrors([{ row: 0, field: 'Exam Name', message: 'Exam Name is required (e.g. TRE 1 or BPSC TRE 3.0).' }]);
-        setIsProcessing(false);
-        return;
-      }
-
-      if (!paperYear.trim()) {
-        setValidationErrors([{ row: 0, field: 'Year / Date', message: 'Year or Date is required (e.g. 2023 or 2024-08-09).' }]);
-        setIsProcessing(false);
-        return;
-      }
-
       if (!inputText.trim()) {
         setValidationErrors([{ row: 0, field: 'Payload Input', message: 'Input CSV or JSON text cannot be empty.' }]);
         setIsProcessing(false);
@@ -129,10 +119,10 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
       let dups = 0;
 
       const metadataOverride = {
-        examName: examName.trim(),
-        year: paperYear.trim(),
-        shift: paperShift.trim(),
-        subject: defaultSubject.trim(),
+        examName: examName.trim() || undefined,
+        year: paperYear.trim() || undefined,
+        shift: paperShift.trim() || undefined,
+        subject: defaultSubject.trim() || undefined,
       };
 
       parsedRows.forEach((row, index) => {
@@ -154,7 +144,7 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
         }
 
         if (qText) {
-          const rowKey = `${examName}_${paperYear}_${index}_${computeTextHash(qText)}`;
+          const rowKey = `${row['exam name'] || examName}_${row.date || paperYear}_${index}_${computeTextHash(qText)}`;
           if (seenRowKeys.has(rowKey)) {
             dups++;
             errors.push({
@@ -200,66 +190,10 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
     <div className="space-y-6">
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
-        <h1 className="text-2xl font-bold text-white tracking-tight">Import New Question Paper</h1>
+        <h1 className="text-2xl font-bold text-white tracking-tight">Import Question Paper</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Validate and import official PYQs or practice items via CSV or JSON with custom paper metadata overrides.
+          Upload or paste your CSV or JSON question bank file to validate and import PYQs into the platform.
         </p>
-      </div>
-
-      {/* Paper Metadata Form Header Box */}
-      <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-3">
-        <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Info className="w-4 h-4 text-indigo-400" />
-          <span>Paper Details & Metadata (Applied to Import Batch)</span>
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-          <div>
-            <label className="block text-slate-300 mb-1 font-semibold">
-              Exam Name <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={examName}
-              onChange={(e) => setExamName(e.target.value)}
-              placeholder="e.g. TRE 1 or BPSC TRE 3.0"
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-slate-300 mb-1 font-semibold">
-              Year / Date <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={paperYear}
-              onChange={(e) => setPaperYear(e.target.value)}
-              placeholder="e.g. 2023 or 2024-08-09"
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Shift / Session (Optional)</label>
-            <input
-              type="text"
-              value={paperShift}
-              onChange={(e) => setPaperShift(e.target.value)}
-              placeholder="e.g. Shift 1 (HS)"
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Default Subject (Optional)</label>
-            <input
-              type="text"
-              value={defaultSubject}
-              onChange={(e) => setDefaultSubject(e.target.value)}
-              placeholder="e.g. General Studies"
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -326,7 +260,7 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
                 ? 'Paste CSV question bank rows here...'
                 : 'Paste JSON question bank array here...'
             }
-            rows={14}
+            rows={16}
             className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
           />
 
@@ -352,9 +286,15 @@ Mathematics,Arithmetic / Algebra / Geometry,10% loss on selling price is what pe
           </h2>
 
           {importStatus === 'idle' && (
-            <div className="text-center py-12 text-slate-500 text-xs space-y-2">
-              <UploadCloud className="w-8 h-8 mx-auto text-slate-600 stroke-[1.5]" />
-              <p>Paste or upload your CSV question bank and click Parse & Validate to review.</p>
+            <div className="text-center py-16 text-slate-500 text-xs space-y-3">
+              <UploadCloud className="w-10 h-10 mx-auto text-slate-600 stroke-[1.5]" />
+              <p className="text-slate-400 font-medium">Paste or upload your CSV/JSON question bank and click Parse & Validate.</p>
+              <p className="text-slate-500 text-[11px]">
+                Supported CSV Columns: <br />
+                <code className="text-indigo-400 font-mono text-[10px]">
+                  exam name, date, shift, difficulty level, subject, topic, question, option_a..e, correct op, option_a..e_explanation
+                </code>
+              </p>
             </div>
           )}
 

@@ -1,6 +1,5 @@
 import { Question } from '@/types/database';
 import { computeTextHash } from '@/lib/utils';
-import seedData from '@/lib/seed/seed-data.json';
 
 const STORAGE_KEY = 'exampyqs_custom_questions';
 const INITIALIZED_KEY = 'exampyqs_initialized_v1';
@@ -9,17 +8,17 @@ const INITIALIZED_KEY = 'exampyqs_initialized_v1';
  * Helper to normalize paper IDs / exam codes into clean human-readable Exam Names
  */
 export function normalizeExamName(paperIdOrExam?: string | null, year?: string | number): string {
-  if (!paperIdOrExam) return 'TRE 1 (2023)';
+  if (!paperIdOrExam) return 'BPSC TRE';
   const str = paperIdOrExam.toString().trim();
 
   // Known paper codes and names mapping
-  if (str.includes('2023-08-26') || str.includes('NB-2023-08-26') || str === 'TRE 1') {
+  if (str.includes('2023-08-26') || str.includes('26-Aug-2023') || str === 'TRE 1') {
     return 'TRE 1 (2023)';
   }
-  if (str.includes('2023-12-15') || str.includes('NB-2023-12-15') || str === 'TRE 2') {
+  if (str.includes('2023-12-15') || str.includes('15-Dec-2023') || str === 'TRE 2') {
     return 'TRE 2 (2023)';
   }
-  if (str.includes('2024-08-09') || str.includes('NB-2024-08-09') || str === 'TRE 3') {
+  if (str.includes('2024-08-09') || str.includes('09-Aug-2024') || str === 'TRE 3') {
     return 'TRE 3 (2024)';
   }
 
@@ -109,26 +108,36 @@ export function convertRawRowToQuestion(
     const shft = metadataOverride.shift ? ` - ${metadataOverride.shift.trim()}` : '';
     examName = `${eName}${yr}${shft}`;
   } else {
-    const rawPaper = row.paper || row.paper_id || row.exam || '';
-    examName = normalizeExamName(rawPaper, row.year);
+    const rawPaper = row['exam name'] || row.exam_name || row.paper || row.paper_id || row.exam || '';
+    const rawDate = row.date || row.year || '';
+    examName = normalizeExamName(rawPaper, rawDate);
   }
+
+  // Parse difficulty level: easy, medium, hard
+  const rawDifficulty = (row['difficulty level'] || row.difficulty_level || row.difficulty || 'medium')
+    .toString()
+    .trim()
+    .toLowerCase();
+  const difficulty: 'easy' | 'medium' | 'hard' = ['easy', 'medium', 'hard'].includes(rawDifficulty)
+    ? (rawDifficulty as 'easy' | 'medium' | 'hard')
+    : 'medium';
 
   const qNum = row.question_no ? `Q.${row.question_no}` : `Q.${index + 1}`;
   const officialRef = row.official_source_ref || `${examName} ${qNum}`;
 
   return {
     id: `q-custom-${Date.now()}-${index + 1}`,
-    exam_id: metadataOverride?.examName || row.exam || 'BPSC TRE',
+    exam_id: metadataOverride?.examName || row['exam name'] || row.exam || 'BPSC TRE',
     paper_id: examName,
     subject_id: rawSubject,
-    chapter_id: row.chapter ? row.chapter.toString().trim() : 'General Chapter',
+    chapter_id: row.chapter ? row.chapter.toString().trim() : (row.topic ? row.topic.toString().trim() : 'General Chapter'),
     topic_id: row.topic ? row.topic.toString().trim() : 'General Topic',
     question_text: qText,
     question_type: 'multiple_choice',
     source_type: 'official_pyq',
     official_source_ref: officialRef,
     derived_from_question_id: null,
-    difficulty: 'medium',
+    difficulty,
     marks: 1.0,
     negative_marks: 0.25,
     status: 'published',
@@ -140,7 +149,7 @@ export function convertRawRowToQuestion(
     explanations: {
       id: `exp-${index}`,
       question_id: `q-custom-${Date.now()}-${index + 1}`,
-      overall_explanation: row.explanation || row.overall_explanation || 'Refer to standard NCERT/SCERT concept solution.',
+      overall_explanation: row.explanation || row.overall_explanation || 'Refer to standard concept solution.',
       concept_summary: row.source_basis || null,
       key_takeaway: row.source_basis || null,
       created_at: new Date().toISOString(),
@@ -150,15 +159,13 @@ export function convertRawRowToQuestion(
 }
 
 /**
- * Dynamically gets all active questions from localStorage without re-seeding dropped data
+ * Dynamically gets all active questions from localStorage without pre-seeded data
  */
 export function getActiveQuestions(): Question[] {
   let questions: Question[] = [];
 
   if (typeof window !== 'undefined') {
-    const isInitialized = localStorage.getItem(INITIALIZED_KEY);
     const stored = localStorage.getItem(STORAGE_KEY);
-
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -169,16 +176,6 @@ export function getActiveQuestions(): Question[] {
         console.error('Failed to parse stored custom questions', e);
       }
     }
-
-    // Only populate seed data if local storage was NEVER initialized before
-    if (!isInitialized && questions.length === 0) {
-      questions = seedData.questions.map((q, idx) => convertRawRowToQuestion(q, idx));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(questions));
-      localStorage.setItem(INITIALIZED_KEY, 'true');
-    }
-  } else {
-    // SSR Fallback
-    questions = seedData.questions.map((q, idx) => convertRawRowToQuestion(q, idx));
   }
 
   return questions.map((q) => {
