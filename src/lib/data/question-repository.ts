@@ -1,5 +1,6 @@
 import { Question } from '@/types/database';
 import { computeTextHash } from '@/lib/utils';
+import { createClient } from '@/lib/supabase/client';
 
 const STORAGE_KEY = 'exampyqs_custom_questions';
 const INITIALIZED_KEY = 'exampyqs_initialized_v1';
@@ -159,7 +160,7 @@ export function convertRawRowToQuestion(
 }
 
 /**
- * Dynamically gets all active questions from localStorage without pre-seeded data
+ * Dynamically gets all active questions from localStorage with async Supabase background sync
  */
 export function getActiveQuestions(): Question[] {
   let questions: Question[] = [];
@@ -188,7 +189,53 @@ export function getActiveQuestions(): Question[] {
 }
 
 /**
- * Saves questions list (supports appending new imported papers)
+ * Async background sync to fetch questions from Supabase Database
+ */
+export async function syncFromSupabase(): Promise<Question[]> {
+  try {
+    const supabase = createClient();
+    const { data: remoteQuestions, error } = await supabase
+      .from('questions')
+      .select('*, options:question_options(*), explanations:question_explanations(*)');
+
+    if (!error && Array.isArray(remoteQuestions) && remoteQuestions.length > 0) {
+      const mapped: Question[] = remoteQuestions.map((q: any) => ({
+        id: q.id,
+        exam_id: q.exam_id || 'BPSC TRE',
+        paper_id: normalizeExamName(q.paper_id || q.official_source_ref),
+        subject_id: q.subject_id || 'General Studies',
+        chapter_id: q.chapter_id || 'General Chapter',
+        topic_id: q.topic_id || 'General Topic',
+        question_text: q.question_text,
+        question_type: q.question_type || 'multiple_choice',
+        source_type: q.source_type || 'official_pyq',
+        official_source_ref: q.official_source_ref || 'PYQ',
+        derived_from_question_id: q.derived_from_question_id,
+        difficulty: q.difficulty || 'medium',
+        marks: q.marks || 1.0,
+        negative_marks: q.negative_marks || 0.25,
+        status: q.status || 'published',
+        language: q.language || 'en',
+        text_hash: q.text_hash || computeTextHash(q.question_text),
+        created_at: q.created_at,
+        updated_at: q.updated_at,
+        options: q.options || [],
+        explanations: q.explanations?.[0] || q.explanations || undefined,
+        tags: q.tags || [],
+      }));
+
+      saveImportedQuestions(mapped, false);
+      return mapped;
+    }
+  } catch (err) {
+    console.warn('Supabase sync unreachable, using localStorage fallback', err);
+  }
+
+  return getActiveQuestions();
+}
+
+/**
+ * Saves questions list (supports appending new imported papers) and attempts database sync
  */
 export function saveImportedQuestions(questions: Question[], append = false) {
   if (typeof window !== 'undefined') {
@@ -199,6 +246,29 @@ export function saveImportedQuestions(questions: Question[], append = false) {
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(finalQuestions));
     localStorage.setItem(INITIALIZED_KEY, 'true');
+
+    // Attempt background sync to Supabase if configured
+    try {
+      const supabase = createClient();
+      questions.forEach(async (q) => {
+        try {
+          await supabase.from('questions').upsert({
+            id: q.id.startsWith('q-custom-') ? undefined : q.id,
+            question_text: q.question_text,
+            official_source_ref: q.official_source_ref,
+            difficulty: q.difficulty,
+            marks: q.marks,
+            negative_marks: q.negative_marks,
+            status: 'published',
+            text_hash: q.text_hash,
+          });
+        } catch {
+          // Ignore if Supabase is not configured or in offline dev mode
+        }
+      });
+    } catch {
+      // Ignore fallback
+    }
   }
 }
 
