@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, AlertCircle, ArrowRight, ShieldCheck, UserCheck, Key } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-export default function LoginPage() {
+function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/';
@@ -130,7 +130,7 @@ export default function LoginPage() {
             className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>1-Click Dev Admin Login $\rightarrow$ Portal</span>
+            <span>1-Click Dev Admin Login → Portal</span>
           </button>
         </div>
 
@@ -201,12 +201,20 @@ export default function LoginPage() {
                 Create new student account
               </Link>
               <Link href="/" className="text-slate-400 hover:text-white">
-                Continue anonymously $\rightarrow$
+                Continue anonymously →
               </Link>
             </div>
           </div>
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex justify-center items-center text-slate-400 text-xs">Loading login page...</div>}>
+      <LoginFormContent />
+    </Suspense>
   );
 }
