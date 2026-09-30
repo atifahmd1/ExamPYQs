@@ -234,43 +234,181 @@ export async function syncFromSupabase(): Promise<Question[]> {
   return getActiveQuestions();
 }
 
+export interface SupabaseSyncResult {
+  supabaseSynced: boolean;
+  syncedCount: number;
+  error?: string;
+}
+
 /**
  * Saves questions list (supports appending new imported papers) and attempts database sync
  */
 export function saveImportedQuestions(questions: Question[], append = false) {
+  saveImportedQuestionsToSupabase(questions, append).catch((err) => {
+    console.warn('Background Supabase sync error:', err);
+  });
+}
+
+/**
+ * Saves questions list to local storage and syncs to Supabase Database (including options and explanations)
+ */
+export async function saveImportedQuestionsToSupabase(
+  questions: Question[],
+  append = true
+): Promise<SupabaseSyncResult> {
+  let finalQuestions = questions;
   if (typeof window !== 'undefined') {
-    let finalQuestions = questions;
     if (append) {
       const current = getActiveQuestions();
       finalQuestions = [...current, ...questions];
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(finalQuestions));
     localStorage.setItem(INITIALIZED_KEY, 'true');
+  }
 
-    // Attempt background sync to Supabase if configured
-    try {
-      const supabase = createClient();
-      questions.forEach(async (q) => {
-        try {
-          await supabase.from('questions').upsert({
-            id: q.id.startsWith('q-custom-') ? undefined : q.id,
-            question_text: q.question_text,
-            official_source_ref: q.official_source_ref,
-            difficulty: q.difficulty,
-            marks: q.marks,
-            negative_marks: q.negative_marks,
-            status: 'published',
-            text_hash: q.text_hash,
-          });
-        } catch {
-          // Ignore if Supabase is not configured or in offline dev mode
-        }
-      });
-    } catch {
-      // Ignore fallback
+  // Attempt database sync to Supabase
+  try {
+    const supabase = createClient();
+
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url || url.includes('placeholder-project')) {
+      return {
+        supabaseSynced: false,
+        syncedCount: 0,
+        error: 'Supabase URL is not configured or using placeholder.',
+      };
     }
+
+    let syncedCount = 0;
+    let lastError: string | undefined = undefined;
+
+    for (const q of questions) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q.id);
+
+      const questionPayload: any = {
+        question_text: q.question_text,
+        question_type: q.question_type || 'multiple_choice',
+        source_type: q.source_type || 'official_pyq',
+        official_source_ref: q.official_source_ref || null,
+        difficulty: q.difficulty || 'medium',
+        marks: q.marks || 1.0,
+        negative_marks: q.negative_marks || 0.25,
+        status: q.status || 'published',
+        language: q.language || 'en',
+        text_hash: q.text_hash || computeTextHash(q.question_text),
+      };
+
+      if (isUuid) {
+        questionPayload.id = q.id;
+      }
+
+      if (q.exam_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q.exam_id)) {
+        questionPayload.exam_id = q.exam_id;
+      }
+      if (q.paper_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q.paper_id)) {
+        questionPayload.paper_id = q.paper_id;
+      }
+      if (q.subject_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q.subject_id)) {
+        questionPayload.subject_id = q.subject_id;
+      }
+
+      // Insert question into public.questions
+      const { data: insertedQ, error: qErr } = await supabase
+        .from('questions')
+        .insert(questionPayload)
+        .select('id')
+        .single();
+
+      if (qErr) {
+        console.error('Supabase question insert error:', qErr);
+        if (qErr.code === 'PGRST205' || qErr.message.includes('schema cache')) {
+          lastError = "Table 'public.questions' does not exist in your remote Supabase database. Please run the SQL migration script in your Supabase SQL Editor.";
+        } else {
+          lastError = qErr.message;
+        }
+        continue;
+      }
+
+      if (insertedQ?.id) {
+        syncedCount++;
+        const realQuestionId = insertedQ.id;
+
+        // Insert options into public.question_options
+        if (q.options && q.options.length > 0) {
+          const optionsPayload = q.options.map((opt) => ({
+            question_id: realQuestionId,
+            option_letter: opt.option_letter,
+            option_text: opt.option_text,
+            is_correct: opt.is_correct,
+            explanation: opt.explanation || null,
+          }));
+
+          const { error: optErr } = await supabase
+            .from('question_options')
+            .insert(optionsPayload);
+
+          if (optErr) {
+            console.error('Supabase options insert error:', optErr);
+          }
+        }
+
+        // Insert explanations into public.question_explanations
+        if (q.explanations && q.explanations.overall_explanation) {
+          const { error: expErr } = await supabase
+            .from('question_explanations')
+            .insert({
+              question_id: realQuestionId,
+              overall_explanation: q.explanations.overall_explanation,
+              concept_summary: q.explanations.concept_summary || null,
+              key_takeaway: q.explanations.key_takeaway || null,
+            });
+
+          if (expErr) {
+            console.error('Supabase explanation insert error:', expErr);
+          }
+        }
+
+        // Insert tags into public.question_tags
+        if (q.tags && q.tags.length > 0) {
+          const uniqueTags = Array.from(new Set(q.tags)).filter(Boolean);
+          const tagsPayload = uniqueTags.map((tag) => ({
+            question_id: realQuestionId,
+            tag_name: tag,
+          }));
+
+          const { error: tagErr } = await supabase
+            .from('question_tags')
+            .insert(tagsPayload);
+
+          if (tagErr) {
+            console.error('Supabase tags insert error:', tagErr);
+          }
+        }
+      }
+    }
+
+    if (syncedCount > 0) {
+      return {
+        supabaseSynced: true,
+        syncedCount,
+      };
+    } else {
+      return {
+        supabaseSynced: false,
+        syncedCount: 0,
+        error: lastError || 'Failed to insert questions into Supabase database.',
+      };
+    }
+  } catch (err: any) {
+    console.error('Supabase sync exception:', err);
+    return {
+      supabaseSynced: false,
+      syncedCount: 0,
+      error: err.message || 'An unexpected error occurred during database sync.',
+    };
   }
 }
+
 
 /**
  * Updates a single question by ID

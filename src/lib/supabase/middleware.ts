@@ -1,71 +1,110 @@
+// src/lib/supabase/middleware.ts
+
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
+  let response = NextResponse.next({
     request,
   });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder-project.supabase.co';
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    'placeholder-anon-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  const supabase = createServerClient(url, key, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        supabaseResponse = NextResponse.next({
-          request,
-        });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options)
-        );
-      },
-    },
-  });
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
 
+  const supabase = createServerClient(
+    supabaseUrl,
+    supabaseKey,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value);
+          });
+
+          response = NextResponse.next({
+            request,
+          });
+
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  /*
+   * IMPORTANT:
+   * Use getUser(), not getSession().
+   *
+   * getUser() validates the authenticated user
+   * with Supabase Auth.
+   */
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const reqUrl = request.nextUrl.clone();
-  const devRoleCookie = request.cookies.get('exampyqs_dev_role')?.value;
+  const pathname = request.nextUrl.pathname;
 
-  // Admin Route Protection
-  if (reqUrl.pathname.startsWith('/admin')) {
-    // Check if dev role cookie is set to admin
-    if (devRoleCookie === 'admin') {
-      return supabaseResponse;
-    }
-
+  /*
+   * ADMIN ROUTES
+   */
+  if (pathname.startsWith('/admin')) {
+    /*
+     * 1. User must be logged in
+     */
     if (!user) {
-      reqUrl.pathname = '/login';
-      reqUrl.searchParams.set('redirectTo', request.nextUrl.pathname);
-      return NextResponse.redirect(reqUrl);
+      const url = request.nextUrl.clone();
+
+      url.pathname = '/login';
+      url.searchParams.set(
+        'redirectTo',
+        pathname
+      );
+
+      return NextResponse.redirect(url);
     }
 
-    // Grant access if email contains admin or role is admin
-    if (user.email?.toLowerCase().includes('admin')) {
-      return supabaseResponse;
-    }
-
-    // Verify role in profiles table
-    const { data: profile } = await supabase
+    /*
+     * 2. Check user's role in database
+     */
+    const { data: profile, error } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (!profile || profile.role !== 'admin') {
-      reqUrl.pathname = '/unauthorized';
-      return NextResponse.redirect(reqUrl);
+    /*
+     * 3. No profile / DB error / non-admin
+     *    => deny access
+     */
+    if (
+      error ||
+      !profile ||
+      profile.role !== 'admin'
+    ) {
+      console.warn('[Middleware] Access denied to /admin:', {
+        userId: user.id,
+        userEmail: user.email,
+        foundProfile: profile,
+        dbError: error,
+      });
+
+      const url = request.nextUrl.clone();
+
+      url.pathname = '/unauthorized';
+
+      return NextResponse.redirect(url);
     }
   }
 
-  return supabaseResponse;
+  return response;
 }
